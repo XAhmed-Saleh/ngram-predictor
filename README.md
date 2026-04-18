@@ -12,7 +12,7 @@ A next-word prediction system built from scratch using an n-gram language model 
 
 1. **Clone the repository**
    ```bash
-   git clone <your-repo-url>
+   git clone git@github.com:XAhmed-Saleh/ngram-predictor.git
    cd ngram-predictor
    ```
 
