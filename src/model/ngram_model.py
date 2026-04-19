@@ -13,6 +13,10 @@ from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
+# Stupid backoff discount factor: probability is multiplied by this factor
+# for each step down in n-gram order (e.g., 0.4^1 for bigram fallback, 0.4^2 for unigram)
+_BACKOFF_FACTOR = 0.4
+
 
 class NGramModel:
     """Builds, stores, and queries n-gram probability tables with backoff.
@@ -182,10 +186,13 @@ class NGramModel:
         logger.info("Built probabilities for orders 1 through %d", self.ngram_order)
 
     def lookup(self, context):
-        """Backoff lookup: try the highest-order context first, fall back.
+        """Backoff lookup: accumulate candidates across all n-gram orders.
 
-        Iterates from the highest order down to 1-gram. Returns the
-        probability dict from the first order where the context is found.
+        Iterates from the highest order down to 1-gram, accumulating
+        candidate next words with their probabilities. Higher-order matches
+        are preferred via backoff discounting: each step down applies a
+        discount factor of 0.4. Words found at higher orders are not
+        re-scored at lower orders.
 
         Parameters
         ----------
@@ -196,20 +203,25 @@ class NGramModel:
         -------
         dict[str, float]
             A dictionary mapping candidate next words to their
-            probabilities. Empty dict if no match at any order.
+            backoff-discounted probabilities. Empty dict if no candidates
+            at any order. Words are accumulated across all fallback levels.
         """
-        for order in range(self.ngram_order, 0, -1):
+        candidates = {}
+
+        for step, order in enumerate(range(self.ngram_order, 0, -1)):
             key = f"{order}gram"
 
             if key not in self.probabilities:
                 continue
 
+            discount = _BACKOFF_FACTOR ** step
+
             if order == 1:
-                # Unigram: return all unigram probabilities
-                result = self.probabilities.get(key, {})
-                if result:
-                    logger.debug("Backoff reached 1gram, returning %d candidates", len(result))
-                    return dict(result)
+                # Unigram: add all unigram probabilities with discount
+                unigrams = self.probabilities.get(key, {})
+                for word, prob in unigrams.items():
+                    if word not in candidates:
+                        candidates[word] = prob * discount
             else:
                 # Higher order: use last (order-1) words as context
                 ctx_len = order - 1
@@ -220,12 +232,19 @@ class NGramModel:
 
                 result = self.probabilities.get(key, {}).get(context_key, {})
                 if result:
-                    logger.debug("Found match at %s for context '%s': %d candidates",
-                                 key, context_key, len(result))
-                    return dict(result)
+                    for word, prob in result.items():
+                        if word not in candidates:
+                            candidates[word] = prob * discount
+                    logger.debug("Found match at %s for context '%s': %d candidates at discount %.2f",
+                                 key, context_key, len(result), discount)
 
-        logger.debug("No match found at any order for context: %s", context)
-        return {}
+        if candidates:
+            logger.debug("Backoff lookup for context %s returned %d total candidates",
+                         context, len(candidates))
+        else:
+            logger.debug("No match found at any order for context: %s", context)
+
+        return candidates
 
     def save_model(self, model_path):
         """Save all probability tables to a JSON file.

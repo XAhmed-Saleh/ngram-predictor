@@ -91,6 +91,9 @@ class Predictor:
         Orchestrates: normalize → map_oov → NGramModel.lookup() →
         sort by probability descending → return top-k words.
 
+        The NGramModel.lookup() method handles all backoff logic
+        (iterating through n-gram orders and applying discount factors).
+
         Parameters
         ----------
         text : str
@@ -115,19 +118,8 @@ class Predictor:
         context = self.normalize(text)
         context = self.map_oov(context)
 
-        # Stupid backoff: try progressively shorter contexts, discounting by 0.4 per level
-        _BACKOFF_FACTOR = 0.4
-        candidates = {}
-        for step, length in enumerate(range(len(context), -1, -1)):
-            sub_context = context[-length:] if length > 0 else []
-            result = self.model.lookup(sub_context)
-            discount = _BACKOFF_FACTOR ** step
-            for word, prob in result.items():
-                if word not in candidates:
-                    candidates[word] = prob * discount
-            non_unk = [w for w in candidates if w != "<UNK>"]
-            if len(non_unk) >= k:
-                break
+        # Delegate backoff lookup to the model (handles all orders and discounting)
+        candidates = self.model.lookup(context)
 
         if not candidates:
             logger.debug("No predictions found for context: %s", context)
