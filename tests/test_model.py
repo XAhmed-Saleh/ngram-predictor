@@ -79,18 +79,11 @@ class TestLookup:
         assert result == {}
 
     def test_probabilities_sum_to_approximately_one(self, trained_model):
-        # With Stupid Backoff discounting, probabilities won't sum to 1.0.
-        # They accumulate across orders with decreasing discounts (0.4, 0.16, 0.064, ...).
-        # Just verify that candidates are returned with valid probabilities.
+        # For a seen context, the candidates should sum to ~1
         result = trained_model.lookup(["the"])
         if result:
-            # All probabilities should be in (0, 1]
-            for word, prob in result.items():
-                assert 0 < prob <= 1.0, f"Word '{word}' has invalid probability {prob}"
-            # Probabilities should sum to less than 1.0 due to backoff discounting
             total = sum(result.values())
-            assert total <= 1.0, f"Probabilities sum to {total}, expected <= 1.0 with backoff discounting"
-            assert total > 0, f"Probabilities sum to {total}, expected > 0"
+            assert abs(total - 1.0) < 0.01, f"Probabilities sum to {total}, expected ~1.0"
 
 
 # --- save and load ---

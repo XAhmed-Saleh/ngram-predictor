@@ -49,13 +49,16 @@ class Evaluator:
             log2 of the probability if the word is found in the
             lookup results, otherwise None (zero probability at all orders).
         """
-        # Delegate backoff lookup to the model (handles all orders and discounting)
-        candidates = self.model.lookup(context)
-        if candidates and word in candidates:
-            prob = candidates[word]
-            if prob <= 0:
-                return None
-            return math.log2(prob)
+        # Use stupid backoff: try progressively shorter contexts with 0.4 discount per level
+        _BACKOFF_FACTOR = 0.4
+        for step, length in enumerate(range(len(context), -1, -1)):
+            sub_context = context[-length:] if length > 0 else []
+            candidates = self.model.lookup(sub_context)
+            if candidates and word in candidates:
+                prob = candidates[word] * (_BACKOFF_FACTOR ** step)
+                if prob <= 0:
+                    return None
+                return math.log2(prob)
         return None
 
     def compute_perplexity(self, eval_file):
